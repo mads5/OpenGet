@@ -1,119 +1,220 @@
-from fastapi import APIRouter, HTTPException, Query, Header
+import asyncio
+import logging
+
+from fastapi import APIRouter, HTTPException, Header
 from uuid import UUID
 
-from app.core.supabase import get_supabase_admin
-from app.schemas.pools import (
-    PoolCreate,
-    PoolUpdate,
-    PoolResponse,
-    PoolListResponse,
-    DonationCreate,
-    DonationResponse,
-    PoolProgressResponse,
-)
+from fastapi import Request
+from app.core.auth import get_auth_user
+from app.core.config import get_settings
+from app.core.stripe_client import ensure_stripe_initialized
+from app.schemas.pools import DonationCreate, DonationResponse, PoolResponse, PoolDetailResponse, CheckoutRequest, UpiQrRequest
 from app.services.pool_service import PoolService
 
-router = APIRouter(prefix="/pools", tags=["pools"])
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/pool", tags=["pool"])
 
 
-def _get_user_id_from_token(authorization: str | None) -> str | None:
-    """Extract user ID from Supabase JWT via the admin client."""
-    if not authorization:
-        return None
-    token = authorization.replace("Bearer ", "")
+@router.get("", response_model=PoolResponse | None)
+async def get_active_pool():
+    service = PoolService()
+    pool = await service.ensure_active_pool()
+    return pool
+
+
+@router.get("/{pool_id}")
+async def get_pool_detail(pool_id: UUID):
+    service = PoolService()
     try:
-        from supabase import create_client
-        from app.core.config import get_settings
-        settings = get_settings()
-        client = create_client(settings.supabase_url, settings.supabase_key)
-        user_response = client.auth.get_user(token)
-        return str(user_response.user.id) if user_response.user else None
-    except Exception:
-        return None
+        return await service.get_pool_detail(pool_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.get("", response_model=PoolListResponse)
-async def list_pools(
-    status: str | None = None,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
-):
-    service = PoolService()
-    return await service.list_pools(status, page, per_page)
-
-
-@router.get("/{pool_id}", response_model=PoolProgressResponse)
-async def get_pool(pool_id: UUID):
-    service = PoolService()
-    pool = await service.get_pool(pool_id)
-    if not pool:
-        raise HTTPException(status_code=404, detail="Pool not found")
-
-    donations = await service.get_pool_donations(pool_id)
-    funding_pct = (
-        (pool["current_amount_cents"] + pool["matched_pool_cents"])
-        / max(pool["target_amount_cents"], 1)
-        * 100
-    )
-    return {
-        "pool": pool,
-        "funding_percentage": round(funding_pct, 2),
-        "donations": donations,
-    }
-
-
-@router.post("", response_model=PoolResponse, status_code=201)
-async def create_pool(pool: PoolCreate):
-    service = PoolService()
-    data = {
-        **pool.model_dump(mode="json"),
-        "current_amount_cents": 0,
-        "matched_pool_cents": 0,
-        "status": "active",
-        "donor_count": 0,
-        "project_count": 0,
-    }
-    return await service.create_pool(data)
-
-
-@router.patch("/{pool_id}", response_model=PoolResponse)
-async def update_pool(pool_id: UUID, update: PoolUpdate):
-    service = PoolService()
-    pool = await service.get_pool(pool_id)
-    if not pool:
-        raise HTTPException(status_code=404, detail="Pool not found")
-
-    data = update.model_dump(exclude_none=True)
-    if not data:
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    result = service.db.table("money_pools").update(data).eq("id", str(pool_id)).execute()
-    if not result.data:
-        raise HTTPException(status_code=500, detail="Failed to update pool")
-    return result.data[0]
-
-
-@router.post("/{pool_id}/donate", response_model=DonationResponse, status_code=201)
-async def donate_to_pool(
-    pool_id: UUID,
-    donation: DonationCreate,
+@router.post("/create-checkout-session")
+async def create_checkout_session(
+    body: CheckoutRequest,
     authorization: str | None = Header(None),
 ):
-    donor_id = _get_user_id_from_token(authorization)
-    if not donor_id:
-        raise HTTPException(status_code=401, detail="Authentication required to donate")
+    user = get_auth_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in to donate")
+
+    settings = get_settings()
+    if not settings.stripe_secret_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Payment gateway not configured. Please ask the admin to set the Stripe secret key.",
+        )
+
+    ensure_stripe_initialized()
+    import stripe
 
     service = PoolService()
+    pool = await service.ensure_active_pool()
+
+    currency = body.currency or settings.stripe_currency or "usd"
+
     try:
-        data = {
-            **donation.model_dump(mode="json"),
-            "pool_id": str(pool_id),
-            "project_id": str(donation.project_id),
-            "donor_id": donor_id,
-        }
-        return await service.add_donation(data)
+        session = await asyncio.to_thread(
+            stripe.checkout.Session.create,
+            mode="payment",
+            line_items=[{
+                "price_data": {
+                    "currency": currency,
+                    "unit_amount": body.amount_cents,
+                    "product_data": {
+                        "name": f"Donation to {pool['name']}",
+                        "description": "Fund open-source contributors on OpenGet",
+                    },
+                },
+                "quantity": 1,
+            }],
+            metadata={
+                "pool_id": pool["id"],
+                "donor_id": user.id,
+                "message": body.message or "",
+                "currency": currency,
+            },
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except Exception as e:
+        logger.exception("Stripe Checkout session creation failed")
+        raise HTTPException(status_code=502, detail=f"Payment gateway error: {e}")
+
+    return {"checkout_url": session.url, "session_id": session.id}
+
+
+@router.post("/donate", response_model=DonationResponse, status_code=201)
+async def donate(
+    body: DonationCreate,
+    authorization: str | None = Header(None),
+):
+    """Record a donation (called by webhook after payment, or directly if Stripe is not set up)."""
+    user = get_auth_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in to donate")
+
+    service = PoolService()
+    pool = await service.ensure_active_pool()
+
+    try:
+        return await service.add_donation(pool["id"], user.id, body.amount_cents, body.message)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/create-upi-qr")
+async def create_upi_qr(
+    body: UpiQrRequest,
+    authorization: str | None = Header(None),
+):
+    """Generate a Razorpay UPI QR code for INR donations."""
+    user = get_auth_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in to donate")
+
+    settings = get_settings()
+    if not settings.razorpay_key_id or not settings.razorpay_key_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="UPI payments not configured. Ask the admin to set Razorpay keys.",
+        )
+
+    service = PoolService()
+    pool = await service.ensure_active_pool()
+
+    try:
+        import razorpay
+        import time
+
+        client = razorpay.Client(auth=(settings.razorpay_key_id, settings.razorpay_key_secret))
+
+        qr = await asyncio.to_thread(
+            client.qrcode.create,
+            {
+                "type": "upi_qr",
+                "name": "OpenGet Donation",
+                "usage": "single_use",
+                "fixed_amount": True,
+                "payment_amount": body.amount_paisa,
+                "description": f"Donation to {pool['name']}",
+                "close_by": int(time.time()) + 900,
+                "notes": {
+                    "pool_id": pool["id"],
+                    "donor_id": user.id,
+                    "message": body.message or "",
+                },
+            },
+        )
+
+        return {
+            "qr_id": qr["id"],
+            "image_url": qr["image_url"],
+            "amount_paisa": body.amount_paisa,
+            "status": qr.get("status", "active"),
+        }
+    except Exception as e:
+        logger.exception("Razorpay QR creation failed")
+        raise HTTPException(status_code=502, detail=f"UPI QR error: {e}")
+
+
+@router.post("/razorpay-webhook")
+async def razorpay_webhook(request: Request):
+    """Handle Razorpay webhook for QR code payments."""
+    payload = await request.json()
+    event = payload.get("event")
+
+    if event == "qr_code.credited":
+        qr_entity = payload.get("payload", {}).get("qr_code", {}).get("entity", {})
+        payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
+
+        notes = qr_entity.get("notes", {})
+        pool_id = notes.get("pool_id")
+        donor_id = notes.get("donor_id")
+        message = notes.get("message") or None
+        amount_paisa = payment_entity.get("amount", 0)
+
+        if pool_id and donor_id and amount_paisa > 0:
+            try:
+                service = PoolService()
+                await service.add_donation(pool_id, donor_id, amount_paisa, message, "inr")
+                logger.info(
+                    "Razorpay UPI donation recorded: pool=%s donor=%s amount=%d paisa",
+                    pool_id, donor_id, amount_paisa,
+                )
+            except Exception:
+                logger.exception("Failed to record Razorpay donation")
+
+    return {"received": True, "event": event}
+
+
+@router.get("/upi-qr-status/{qr_id}")
+async def check_upi_qr_status(qr_id: str):
+    """Poll the status of a Razorpay QR code payment."""
+    settings = get_settings()
+    if not settings.razorpay_key_id or not settings.razorpay_key_secret:
+        raise HTTPException(status_code=503, detail="UPI not configured")
+
+    try:
+        import razorpay
+
+        client = razorpay.Client(auth=(settings.razorpay_key_id, settings.razorpay_key_secret))
+        qr = await asyncio.to_thread(client.qrcode.fetch, qr_id)
+        payments_count = qr.get("payments_count_received", 0)
+
+        return {
+            "qr_id": qr_id,
+            "status": qr.get("status"),
+            "paid": payments_count > 0,
+            "payments_count": payments_count,
+            "close_reason": qr.get("close_reason"),
+        }
+    except Exception as e:
+        logger.exception("Failed to check QR status")
+        raise HTTPException(status_code=502, detail=f"Could not check status: {e}")
 
 
 @router.post("/{pool_id}/distribute")

@@ -6,9 +6,9 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "OSSPool - Fund Open Source with Quadratic Funding",
+  title: "OpenGet - Reward Open Source Contributors",
   description:
-    "Discover, rank, and fund critical open-source projects through quadratic funding pools.",
+    "List your repo, donate to the pool, and reward open-source contributors based on their code quality.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -17,9 +17,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={inter.className}>
         <Header />
         <main className="min-h-[calc(100vh-4rem)]">{children}</main>
-        <footer className="border-t py-8">
+        <footer className="border-t border-border/50 py-8">
           <div className="container text-center text-sm text-muted-foreground">
-            OSSPool — Quadratic Funding for Open Source
+            Open<span className="text-primary">Get</span> — Rewarding Open Source Contributors
           </div>
         </footer>
       </body>

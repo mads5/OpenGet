@@ -1,75 +1,128 @@
 import asyncio
 import logging
 
-from app.core.celery_app import celery
 from app.core.supabase import get_supabase_admin
 from app.crawler.github_crawler import GitHubCrawler
+from app.services.contributor_service import ContributorService
+from app.core.celery_app import celery
 
 logger = logging.getLogger(__name__)
 
 
-def _run_async(coro):
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+async def _fetch_repo_contributors(repo_id: str) -> dict:
+    db = get_supabase_admin()
+    repo_result = db.table("repos").select("*").eq("id", repo_id).single().execute()
+    if not repo_result.data:
+        return {"error": "Repo not found"}
 
+    repo = repo_result.data
+    owner = repo["owner"]
+    repo_name = repo["repo_name"]
 
-@celery.task(bind=True, max_retries=3, default_retry_delay=60)
-def crawl_single_project(self, project_id: str):
-    try:
-        db = get_supabase_admin()
-        project = db.table("projects").select("*").eq("id", project_id).single().execute()
-        if not project.data:
-            logger.error(f"Project {project_id} not found")
-            return
+    crawler = GitHubCrawler()
 
-        url = project.data["github_url"]
-        parts = url.rstrip("/").split("/")
-        if len(parts) < 2:
-            logger.error(f"Invalid GitHub URL for project {project_id}: {url}")
-            return
-        owner, repo = parts[-2], parts[-1]
+    gh_contributors = await crawler.fetch_repo_contributors(owner, repo_name)
+    if not gh_contributors:
+        return {"repo_id": repo_id, "contributors_added": 0}
 
-        crawler = GitHubCrawler()
-        stats = _run_async(crawler.fetch_repo_stats(owner, repo))
-        stars_history = _run_async(crawler.fetch_stars_history(owner, repo, days=30))
+    count = 0
+    for gh_c in gh_contributors:
+        login = gh_c["login"]
 
-        stars_growth = len(stars_history)
+        existing = db.table("contributors").select("id").eq("github_username", login).execute()
+        if existing.data:
+            contributor_id = existing.data[0]["id"]
+        else:
+            insert_result = db.table("contributors").insert({
+                "github_username": login,
+                "github_id": str(gh_c.get("id", "")),
+                "avatar_url": gh_c.get("avatar_url"),
+                "total_score": 0,
+                "repo_count": 0,
+            }).execute()
+            if not insert_result.data:
+                continue
+            contributor_id = insert_result.data[0]["id"]
 
-        update_data = {
-            "stars": stats.get("stars", 0),
-            "forks": stats.get("forks", 0),
-            "watchers": stats.get("watchers", 0),
-            "open_issues": stats.get("open_issues", 0),
-            "commit_frequency": stats.get("commit_frequency", 0),
-            "dependents_count": stats.get("dependents_count", 0),
-            "download_count": stats.get("download_count", 0),
-            "issue_close_rate": stats.get("issue_close_rate", 0),
-            "stars_growth_rate": stars_growth,
-            "last_commit_at": stats.get("last_push_at"),
-            "description": stats.get("description"),
-            "language": stats.get("language"),
+        rc_existing = (
+            db.table("repo_contributors")
+            .select("id")
+            .eq("repo_id", repo_id)
+            .eq("contributor_id", contributor_id)
+            .execute()
+        )
+
+        try:
+            stats = await crawler.fetch_contributor_stats(owner, repo_name, login)
+        except Exception as e:
+            logger.warning(f"Failed to fetch stats for {login} in {owner}/{repo_name}: {e}")
+            stats = {"commits": gh_c.get("contributions", 0)}
+
+        rc_data = {
+            "repo_id": repo_id,
+            "contributor_id": contributor_id,
+            "commits": stats.get("commits", gh_c.get("contributions", 0)),
+            "prs_merged": stats.get("prs_merged", 0),
+            "lines_added": stats.get("lines_added", 0),
+            "lines_removed": stats.get("lines_removed", 0),
+            "reviews": stats.get("reviews", 0),
+            "issues_closed": stats.get("issues_closed", 0),
+            "last_contribution_at": stats.get("last_contribution_at"),
+            "score": 0,
         }
 
-        db.table("projects").update(update_data).eq("id", project_id).execute()
-        logger.info(f"Crawled project {project_id}: {owner}/{repo}")
-        return {"project_id": project_id, "stats": update_data}
+        if rc_existing.data:
+            db.table("repo_contributors").update(rc_data).eq("id", rc_existing.data[0]["id"]).execute()
+        else:
+            db.table("repo_contributors").insert(rc_data).execute()
+            count += 1
 
-    except Exception as exc:
-        logger.exception(f"Failed to crawl project {project_id}")
-        raise self.retry(exc=exc)
+    db.table("repos").update({
+        "contributor_count": len(gh_contributors),
+        "contributors_fetched_at": "now()",
+    }).eq("id", repo_id).execute()
+
+    service = ContributorService()
+    await service.recompute_scores_for_repo(repo_id)
+    await service.recompute_total_scores()
+
+    return {"repo_id": repo_id, "contributors_added": count, "total": len(gh_contributors)}
 
 
-@celery.task
-def crawl_all_projects():
+async def _recompute_all() -> dict:
     db = get_supabase_admin()
-    result = db.table("projects").select("id").eq("is_active", True).execute()
-    projects = result.data or []
+    repos = db.table("repos").select("id").execute()
+    service = ContributorService()
 
-    for project in projects:
-        crawl_single_project.delay(project["id"])
+    for r in repos.data or []:
+        await service.recompute_scores_for_repo(r["id"])
 
-    logger.info(f"Queued crawl for {len(projects)} projects")
-    return {"queued": len(projects)}
+    await service.recompute_total_scores()
+    return {"repos_processed": len(repos.data or [])}
+
+
+async def run_fetch_repo_contributors_bg(repo_id: str) -> None:
+    """Background task: fetch contributors via Celery or inline async."""
+    if celery is not None:
+        try:
+            celery.send_task("fetch_repo_contributors", args=[repo_id])
+            return
+        except Exception as e:
+            logger.warning(f"Celery dispatch failed, running inline: {e}")
+
+    try:
+        await _fetch_repo_contributors(repo_id)
+    except Exception:
+        logger.exception("Background contributor fetch failed for repo %s", repo_id)
+
+
+if celery is not None:
+    @celery.task(name="fetch_repo_contributors")
+    def fetch_repo_contributors_task(repo_id: str) -> dict:
+        return asyncio.get_event_loop().run_until_complete(
+            _fetch_repo_contributors(repo_id)
+        )
+
+    @celery.task(name="recompute_all_scores")
+    def recompute_all_scores_task() -> dict:
+        return asyncio.get_event_loop().run_until_complete(_recompute_all())

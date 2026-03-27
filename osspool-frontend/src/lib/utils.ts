@@ -6,10 +6,13 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatCurrency(cents: number): string {
+  const code = (process.env.NEXT_PUBLIC_CURRENCY || "usd").toUpperCase();
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
-  }).format(cents / 100);
+    currency: code,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(code === "JPY" ? cents : cents / 100);
 }
 
 export function formatNumber(n: number): string {

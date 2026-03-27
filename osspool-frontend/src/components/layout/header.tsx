@@ -13,7 +13,9 @@ export function Header() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       setAuthError(null);
     });
@@ -27,11 +29,7 @@ export function Header() {
       options: { redirectTo: `${window.location.origin}/api/auth/callback` },
     });
     if (error) {
-      if (error.message.includes("provider") || error.message.includes("not enabled")) {
-        setAuthError("GitHub OAuth not yet configured. See setup guide.");
-      } else {
-        setAuthError(error.message);
-      }
+      setAuthError(error.message);
     }
   };
 
@@ -41,23 +39,51 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="container flex h-16 items-center justify-between">
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">OP</span>
+            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center">
+              <span className="text-white font-bold text-sm">OG</span>
             </div>
-            <span className="font-bold text-xl">OSSPool</span>
+            <span className="font-bold text-xl">
+              Open<span className="text-primary">Get</span>
+            </span>
           </Link>
           <nav className="hidden md:flex items-center gap-6 text-sm">
-            <Link href="/leaderboard" className="text-muted-foreground hover:text-foreground transition-colors">
-              Leaderboard
+            <Link
+              href="/repos"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Repos
+            </Link>
+            <Link
+              href="/contributors"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Contributors
+            </Link>
+            <Link
+              href="/donate"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Donate
             </Link>
             {user && (
-              <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
-                Dashboard
-              </Link>
+              <>
+                <Link
+                  href="/list-repo"
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  List a Repo
+                </Link>
+                <Link
+                  href="/dashboard"
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Dashboard
+                </Link>
+              </>
             )}
           </nav>
         </div>

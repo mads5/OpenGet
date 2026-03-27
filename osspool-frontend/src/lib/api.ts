@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import { getSeedRankings, getSeedProject, SEED_PROJECTS, SEED_POOL } from "@/lib/seed-data";
-import type { LeaderboardResponse, Project, Pool, Payout } from "@/types";
+import type { Repo, Contributor, ContributorDetail, Pool, Donation, Payout, GitHubRepoInfo } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -41,7 +40,6 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
 async function querySupabase<T>(table: string, query: string): Promise<T | null> {
   try {
-    const supabase = createClient();
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!url || !key) return null;
@@ -60,121 +58,186 @@ async function querySupabase<T>(table: string, query: string): Promise<T | null>
   }
 }
 
-export async function getLeaderboard(
-  period: string = "weekly",
-  page: number = 1,
-  perPage: number = 50
-): Promise<LeaderboardResponse> {
-  const offset = (page - 1) * perPage;
-  const supabaseData = await querySupabase<any[]>(
-    "rankings",
-    `select=*&period=eq.${period}&order=rank.asc&offset=${offset}&limit=${perPage}`
+// ---- Repos ----
+
+export async function listRepos(page = 1, perPage = 20): Promise<{ repos: Repo[]; total: number }> {
+  const sbData = await querySupabase<Repo[]>(
+    "repos",
+    `select=*&order=stars.desc&offset=${(page - 1) * perPage}&limit=${perPage}`
   );
-
-  if (supabaseData && supabaseData.length > 0) {
-    return {
-      rankings: supabaseData,
-      period: period as LeaderboardResponse["period"],
-      total: supabaseData.length,
-      page,
-      per_page: perPage,
-      computed_at: supabaseData[0]?.computed_at ?? null,
-    };
-  }
+  if (sbData && sbData.length > 0) return { repos: sbData, total: sbData.length };
 
   try {
-    return await fetchAPI<LeaderboardResponse>(
-      `/rankings/leaderboard?period=${period}&page=${page}&per_page=${perPage}`
-    );
+    return await fetchAPI<{ repos: Repo[]; total: number }>(`/repos?page=${page}&per_page=${perPage}`);
   } catch {
-    // Fall back to seed data
-  }
-
-  const rankings = getSeedRankings(period);
-  return {
-    rankings: rankings.slice(offset, offset + perPage),
-    period: period as LeaderboardResponse["period"],
-    total: rankings.length,
-    page,
-    per_page: perPage,
-    computed_at: new Date().toISOString(),
-  };
-}
-
-export async function getProject(id: string): Promise<Project> {
-  const supabaseData = await querySupabase<any[]>(
-    "projects",
-    `select=*&id=eq.${id}&limit=1`
-  );
-  if (supabaseData && supabaseData.length > 0) return supabaseData[0];
-
-  try {
-    return await fetchAPI<Project>(`/projects/${id}`);
-  } catch {
-    // Fall back to seed data
-  }
-
-  const seed = getSeedProject(id);
-  if (seed) return seed;
-  throw new Error("Project not found");
-}
-
-export async function listProjects(params?: {
-  page?: number;
-  language?: string;
-  search?: string;
-}) {
-  const searchParams = new URLSearchParams();
-  if (params?.page) searchParams.set("page", String(params.page));
-  if (params?.language) searchParams.set("language", params.language);
-  if (params?.search) searchParams.set("search", params.search);
-
-  try {
-    return await fetchAPI(`/projects?${searchParams}`);
-  } catch {
-    return { projects: SEED_PROJECTS, total: SEED_PROJECTS.length, page: 1, per_page: 20 };
+    return { repos: [], total: 0 };
   }
 }
 
-export async function getPool(id: string): Promise<Pool> {
-  const supabaseData = await querySupabase<any[]>("money_pools", `select=*&id=eq.${id}&limit=1`);
-  if (supabaseData && supabaseData.length > 0) return supabaseData[0];
+export async function getRepo(id: string): Promise<Repo> {
+  const sbData = await querySupabase<Repo[]>("repos", `select=*&id=eq.${id}&limit=1`);
+  if (sbData && sbData.length > 0) return sbData[0];
 
+  return fetchAPI<Repo>(`/repos/${id}`);
+}
+
+export async function getRepoContributors(repoId: string) {
   try {
-    return await fetchAPI<Pool>(`/pools/${id}`);
+    return await fetchAPI<{ contributors: any[] }>(`/repos/${repoId}/contributors`);
   } catch {
-    return SEED_POOL;
+    return { contributors: [] };
   }
 }
 
-export async function listPools(status?: string) {
-  const query = status ? `select=*&status=eq.${status}&order=created_at.desc` : "select=*&order=created_at.desc";
-  const supabaseData = await querySupabase<any[]>("money_pools", query);
-  if (supabaseData && supabaseData.length > 0) return { pools: supabaseData, total: supabaseData.length };
-
-  try {
-    const params = status ? `?status=${status}` : "";
-    return await fetchAPI<{ pools: Pool[]; total: number }>(`/pools${params}`);
-  } catch {
-    return { pools: [SEED_POOL], total: 1 };
-  }
+export async function getMyGithubRepos(): Promise<GitHubRepoInfo[]> {
+  return fetchAPI<GitHubRepoInfo[]>("/repos/mine");
 }
 
-export async function donateToPool(poolId: string, data: {
-  project_id: string;
-  amount_cents: number;
-}) {
-  return fetchAPI(`/pools/${poolId}/donate`, {
+export async function listRepo(githubUrl: string): Promise<Repo> {
+  return fetchAPI<Repo>("/repos", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: JSON.stringify({ github_url: githubUrl }),
   });
 }
 
-export async function getEarnings(userId: string) {
+// ---- Contributors ----
+
+export async function listContributors(page = 1, perPage = 50): Promise<{ contributors: Contributor[]; total: number }> {
+  const sbData = await querySupabase<Contributor[]>(
+    "contributors",
+    `select=*&order=total_score.desc&offset=${(page - 1) * perPage}&limit=${perPage}`
+  );
+  if (sbData && sbData.length > 0) {
+    const enriched = sbData.map((c) => ({ ...c, is_registered: c.user_id != null }));
+    return { contributors: enriched, total: enriched.length };
+  }
+
+  try {
+    return await fetchAPI<{ contributors: Contributor[]; total: number }>(`/contributors?page=${page}&per_page=${perPage}`);
+  } catch {
+    return { contributors: [], total: 0 };
+  }
+}
+
+export async function getContributor(id: string): Promise<ContributorDetail> {
+  return fetchAPI<ContributorDetail>(`/contributors/${id}`);
+}
+
+export async function registerContributor(): Promise<Contributor> {
+  return fetchAPI<Contributor>("/contributors/register", { method: "POST" });
+}
+
+// ---- Pool ----
+
+export async function getActivePool(): Promise<Pool | null> {
+  const sbData = await querySupabase<Pool[]>(
+    "pool",
+    `select=*&status=eq.active&order=created_at.desc&limit=1`
+  );
+  if (sbData && sbData.length > 0) return sbData[0];
+
+  try {
+    return await fetchAPI<Pool | null>("/pool");
+  } catch {
+    return null;
+  }
+}
+
+export async function createCheckoutSession(
+  amountCents: number,
+  message?: string,
+  currency?: string,
+): Promise<{ checkout_url: string; session_id: string }> {
+  return fetchAPI<{ checkout_url: string; session_id: string }>("/pool/create-checkout-session", {
+    method: "POST",
+    body: JSON.stringify({
+      amount_cents: amountCents,
+      currency: currency || undefined,
+      message,
+      success_url: `${window.location.origin}/donate/success`,
+      cancel_url: `${window.location.origin}/donate`,
+    }),
+  });
+}
+
+export async function createUpiQr(
+  amountPaisa: number,
+  message?: string,
+): Promise<{ qr_id: string; image_url: string; amount_paisa: number; status: string }> {
+  return fetchAPI<{ qr_id: string; image_url: string; amount_paisa: number; status: string }>("/pool/create-upi-qr", {
+    method: "POST",
+    body: JSON.stringify({ amount_paisa: amountPaisa, message }),
+  });
+}
+
+export async function checkUpiQrStatus(
+  qrId: string,
+): Promise<{ qr_id: string; status: string; paid: boolean; payments_count: number }> {
+  return fetchAPI<{ qr_id: string; status: string; paid: boolean; payments_count: number }>(`/pool/upi-qr-status/${qrId}`);
+}
+
+export async function donate(amountCents: number, message?: string): Promise<Donation> {
+  return fetchAPI<Donation>("/pool/donate", {
+    method: "POST",
+    body: JSON.stringify({ amount_cents: amountCents, message }),
+  });
+}
+
+// ---- Payouts ----
+
+export async function getEarnings() {
   return fetchAPI<{
-    user_id: string;
+    contributor_id: string;
     total_earned_cents: number;
     pending_cents: number;
     payouts: Payout[];
-  }>(`/payouts/earnings/${userId}`);
+  }>("/payouts/earnings");
+}
+
+export async function onboardStripeConnect(userId: string, email: string) {
+  return fetchAPI<{ account_id: string; onboarding_url: string }>("/payouts/stripe-connect", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId, email }),
+  });
+}
+
+// ---- Stats (for homepage) ----
+
+export async function getStats(): Promise<{ repos: number; contributors: number; poolCents: number; donors: number }> {
+  try {
+    const [reposData, contribData, poolData] = await Promise.all([
+      querySupabase<{ count: number }[]>("repos", "select=id&limit=0"),
+      querySupabase<{ count: number }[]>("contributors", "select=id&limit=0"),
+      querySupabase<Pool[]>("pool", "select=*&status=eq.active&order=created_at.desc&limit=1"),
+    ]);
+
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    let repoCount = 0;
+    let contribCount = 0;
+
+    if (url && key) {
+      const [rCount, cCount] = await Promise.all([
+        fetch(`${url}/rest/v1/repos?select=id`, {
+          headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: "application/json", Prefer: "count=exact" },
+        }).then(r => parseInt(r.headers.get("content-range")?.split("/")[1] || "0")).catch(() => 0),
+        fetch(`${url}/rest/v1/contributors?select=id`, {
+          headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: "application/json", Prefer: "count=exact" },
+        }).then(r => parseInt(r.headers.get("content-range")?.split("/")[1] || "0")).catch(() => 0),
+      ]);
+      repoCount = rCount;
+      contribCount = cCount;
+    }
+
+    const pool = poolData && poolData.length > 0 ? poolData[0] : null;
+
+    return {
+      repos: repoCount,
+      contributors: contribCount,
+      poolCents: pool?.total_amount_cents ?? 0,
+      donors: pool?.donor_count ?? 0,
+    };
+  } catch {
+    return { repos: 0, contributors: 0, poolCents: 0, donors: 0 };
+  }
 }

@@ -1,91 +1,85 @@
-export type TimePeriod = "daily" | "weekly" | "monthly" | "yearly" | "all_time";
-
-export interface RankingScoreBreakdown {
-  dependents_score: number;
-  download_velocity_score: number;
-  commit_recency_score: number;
-  issue_close_rate_score: number;
-  stars_growth_score: number;
-  time_decay_factor: number;
-}
-
-export interface RankingEntry {
-  id: string;
-  project_id: string;
-  project_name: string;
-  github_url: string;
-  rank: number;
-  total_score: number;
-  breakdown: RankingScoreBreakdown;
-  period: TimePeriod;
-  computed_at: string;
-}
-
-export interface LeaderboardResponse {
-  rankings: RankingEntry[];
-  period: TimePeriod;
-  total: number;
-  page: number;
-  per_page: number;
-  computed_at: string | null;
-}
-
-export interface Project {
+export interface Repo {
   id: string;
   github_url: string;
-  name: string;
+  owner: string;
+  repo_name: string;
+  full_name: string;
   description: string | null;
   language: string | null;
-  owner_github_id: string;
   stars: number;
   forks: number;
-  watchers: number;
-  open_issues: number;
-  commit_frequency: number;
-  dependents_count: number;
-  download_count: number;
-  issue_close_rate: number;
-  stars_growth_rate: number;
-  last_commit_at: string | null;
-  is_active: boolean;
+  listed_by: string;
+  contributor_count: number;
+  contributors_fetched_at: string | null;
   created_at: string;
-  updated_at: string;
+}
+
+export interface GitHubRepoInfo {
+  full_name: string;
+  html_url: string;
+  description: string | null;
+  language: string | null;
+  stargazers_count: number;
+  forks_count: number;
+  already_listed: boolean;
+}
+
+export interface Contributor {
+  id: string;
+  github_username: string;
+  github_id: string | null;
+  avatar_url: string | null;
+  user_id: string | null;
+  total_score: number;
+  repo_count: number;
+  is_registered: boolean;
+  created_at: string;
+}
+
+export interface ContributorDetail extends Contributor {
+  repos: RepoContribution[];
+}
+
+export interface RepoContribution {
+  repo_id: string;
+  repo_full_name: string;
+  commits: number;
+  prs_merged: number;
+  lines_added: number;
+  lines_removed: number;
+  reviews: number;
+  issues_closed: number;
+  score: number;
+  last_contribution_at: string | null;
 }
 
 export interface Pool {
   id: string;
   name: string;
   description: string | null;
-  target_amount_cents: number;
-  current_amount_cents: number;
-  matched_pool_cents: number;
-  status: "active" | "distributing" | "completed" | "cancelled";
-  start_date: string;
-  end_date: string;
-  match_ratio: number;
+  total_amount_cents: number;
   donor_count: number;
-  project_count: number;
+  status: "active" | "distributing" | "completed";
+  round_start: string;
+  round_end: string;
   created_at: string;
 }
 
 export interface Donation {
   id: string;
   pool_id: string;
-  project_id: string;
   donor_id: string;
   amount_cents: number;
-  matched_amount_cents: number;
+  message: string | null;
   created_at: string;
 }
 
 export interface Payout {
   id: string;
   pool_id: string;
-  project_id: string;
-  recipient_id: string;
+  contributor_id: string;
   amount_cents: number;
-  matched_amount_cents: number;
-  total_payout_cents: number;
+  score_snapshot: number;
   status: "pending" | "processing" | "completed" | "failed";
   stripe_transfer_id: string | null;
   created_at: string;
@@ -97,8 +91,8 @@ export interface User {
   github_id: string;
   github_username: string;
   avatar_url: string | null;
+  display_name: string | null;
   email: string | null;
   stripe_connect_account_id: string | null;
-  is_maintainer: boolean;
   created_at: string;
 }

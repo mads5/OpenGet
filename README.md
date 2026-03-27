@@ -1,90 +1,64 @@
-# OSSPool
+# OpenGet
 
-Open-source project funding platform with quadratic funding distribution. Ranks projects by real-world impact metrics and distributes pooled donations using quadratic funding — where many small donations have outsized matched impact.
+Reward open-source contributors from a community-funded pool. List your repo, donors fund a pool, contributors get paid based on their code quality.
+
+## How It Works
+
+1. **List Your Repo** — Sign in with GitHub, list your open-source repo. We discover all contributors automatically.
+2. **Donate to the Pool** — Anyone can donate to a shared funding pool.
+3. **Contributors Get Paid** — The pool is distributed using a two-tier model:
+   - **Tier 1 (Repos):** Each repo gets a share based on `sqrt(stars) × log2(1 + contributors)` — so popular repos get more, but with diminishing returns so small repos still get meaningful funding.
+   - **Tier 2 (Contributors):** Within each repo's share, contributors are paid based on code quality: commits, PRs merged, lines changed, code reviews, issues closed, and recency.
 
 ## Architecture
 
 ```
 osspool-backend/     FastAPI + Celery + Redis
 osspool-frontend/    Next.js 14 + Tailwind + shadcn/ui
-supabase/            Database migrations & RLS policies
-docker-compose.yml   Full-stack orchestration
+supabase/            Database migrations (PostgreSQL)
 ```
-
-## Backend Stack
-
-- **FastAPI** — async REST API with Pydantic validation
-- **Supabase** — PostgreSQL database with Row-Level Security
-- **Celery + Redis** — task queue for crawling & ranking computation
-- **httpx** — async GitHub API crawler with rate-limit handling
-- **Stripe Connect** — payout processing to maintainers
-
-### API Endpoints
-
-| Route | Description |
-|---|---|
-| `GET /api/v1/rankings/leaderboard` | Leaderboard with period toggle |
-| `GET /api/v1/projects` | List/search projects |
-| `POST /api/v1/projects` | Register a project |
-| `GET /api/v1/pools` | List funding pools |
-| `POST /api/v1/pools/{id}/donate` | Donate to a pool |
-| `POST /api/v1/payouts/connect/onboard` | Stripe Connect onboarding |
-| `GET /api/v1/payouts/earnings/{user_id}` | Maintainer earnings |
-
-### Ranking Algorithm
-
-Projects scored with weighted metrics:
-- **Dependent packages** (30%) — how many projects depend on this
-- **Download velocity** (25%) — package download momentum
-- **Commit recency** (20%) — how recently maintained
-- **Issue close rate** (15%) — responsiveness to issues
-- **Stars growth rate** (10%) — community adoption velocity
-
-Time-decay is applied per period (daily rankings weight recent activity much more heavily than all-time).
-
-## Frontend Stack
-
-- **Next.js 14** App Router
-- **Tailwind CSS** + **shadcn/ui** components
-- **Supabase Auth** with GitHub OAuth
-- Leaderboard, project detail, pool progress, maintainer dashboard
 
 ## Quick Start
 
+### 1. Database
+Apply the migration in `supabase/migrations/` to your Supabase project via the SQL Editor.
+
+### 2. Backend
 ```bash
-# 1. Clone and configure
-cp osspool-backend/.env.example osspool-backend/.env
-cp osspool-frontend/.env.example osspool-frontend/.env
-# Fill in your Supabase, GitHub, Stripe, and Redis credentials
-
-# 2. Run the Supabase migration
-# Apply supabase/migrations/20260327000000_initial_schema.sql to your Supabase project
-
-# 3. Start everything
-docker-compose up --build
-
-# Backend:  http://localhost:8000
-# Frontend: http://localhost:3000
-# API docs: http://localhost:8000/docs
-```
-
-## Development (without Docker)
-
-```bash
-# Backend
 cd osspool-backend
 pip install -r requirements.txt
+cp .env.example .env   # fill in your keys
 uvicorn app.main:app --reload
+```
 
-# Celery worker
-celery -A app.core.celery_app:celery worker --loglevel=info
-
-# Frontend
+### 3. Frontend
+```bash
 cd osspool-frontend
 npm install
+cp .env.example .env   # fill in your keys
 npm run dev
 ```
 
-## License
+### 4. Environment Variables
 
-See [LICENSE](LICENSE).
+**Backend (.env):**
+- `SUPABASE_URL` / `SUPABASE_KEY` — Supabase project URL and service role key
+- `GITHUB_TOKEN` — GitHub Personal Access Token
+- `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` — Stripe (optional for MVP)
+
+**Frontend (.env):**
+- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_API_URL` — Backend API URL (default: http://localhost:8000/api/v1)
+
+## API Endpoints
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/v1/repos` | GET | List repos sorted by stars |
+| `/api/v1/repos/mine` | GET | Your GitHub repos (auth required) |
+| `/api/v1/repos` | POST | List a repo |
+| `/api/v1/contributors` | GET | Contributor leaderboard |
+| `/api/v1/contributors/register` | POST | Register as contributor |
+| `/api/v1/pool` | GET | Active funding pool |
+| `/api/v1/pool/donate` | POST | Donate to pool |
+| `/api/v1/payouts/earnings` | GET | Your earnings |

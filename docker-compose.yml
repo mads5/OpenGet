@@ -14,7 +14,7 @@ services:
     volumes:
       - ./osspool-backend:/app
     networks:
-      - osspool
+      - openget
 
   # ---------- Celery Worker ----------
   celery-worker:
@@ -27,7 +27,7 @@ services:
     volumes:
       - ./osspool-backend:/app
     networks:
-      - osspool
+      - openget
 
   # ---------- Celery Beat (Scheduler) ----------
   celery-beat:
@@ -40,7 +40,7 @@ services:
     volumes:
       - ./osspool-backend:/app
     networks:
-      - osspool
+      - openget
 
   # ---------- Redis ----------
   redis:
@@ -51,7 +51,7 @@ services:
       - redis-data:/data
     restart: unless-stopped
     networks:
-      - osspool
+      - openget
 
   # ---------- Frontend ----------
   frontend:
@@ -63,11 +63,11 @@ services:
       - api
     restart: unless-stopped
     networks:
-      - osspool
+      - openget
 
 volumes:
   redis-data:
 
 networks:
-  osspool:
+  openget:
     driver: bridge
