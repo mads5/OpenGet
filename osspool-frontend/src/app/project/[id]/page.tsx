@@ -43,23 +43,17 @@ export default function ProjectPage() {
     );
   }
 
-  if (error) {
+  if (error || !project) {
     return (
-      <div className="container py-20 text-center text-destructive">
-        {error}
-      </div>
-    );
-  }
-
-  if (!project) {
-    return (
-      <div className="container py-20 text-center text-muted-foreground">
-        Project not found
+      <div className="container py-20 text-center">
+        <h2 className="text-2xl font-bold mb-2">Project not found</h2>
+        <p className="text-muted-foreground">{error || "This project doesn't exist."}</p>
       </div>
     );
   }
 
   const activePool = pools[0];
+  const repoPath = project.github_url.replace("https://github.com/", "");
 
   return (
     <div className="container py-8">
@@ -79,11 +73,11 @@ export default function ProjectPage() {
               rel="noopener noreferrer"
               className="text-sm text-primary hover:underline mt-2 inline-block"
             >
-              {project.github_url.replace("https://github.com/", "")}
+              {repoPath}
             </a>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {[
               { label: "Stars", value: formatNumber(project.stars) },
               { label: "Forks", value: formatNumber(project.forks) },
@@ -91,6 +85,9 @@ export default function ProjectPage() {
               { label: "Open Issues", value: formatNumber(project.open_issues) },
               { label: "Dependents", value: formatNumber(project.dependents_count) },
               { label: "Commits/Week", value: (project.commit_frequency ?? 0).toFixed(1) },
+              { label: "Downloads", value: formatNumber(project.download_count) },
+              { label: "Issue Close Rate", value: `${((project.issue_close_rate ?? 0) * 100).toFixed(0)}%` },
+              { label: "Stars Growth", value: `+${formatNumber(project.stars_growth_rate)}/mo` },
             ].map((stat) => (
               <Card key={stat.label}>
                 <CardContent className="pt-4 pb-4">

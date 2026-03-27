@@ -8,21 +8,31 @@ import type { User } from "@supabase/supabase-js";
 
 export function Header() {
   const [user, setUser] = useState<User | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      setAuthError(null);
     });
     return () => subscription.unsubscribe();
   }, [supabase]);
 
   const handleSignIn = async () => {
-    await supabase.auth.signInWithOAuth({
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "github",
       options: { redirectTo: `${window.location.origin}/api/auth/callback` },
     });
+    if (error) {
+      if (error.message.includes("provider") || error.message.includes("not enabled")) {
+        setAuthError("GitHub OAuth not yet configured. See setup guide.");
+      } else {
+        setAuthError(error.message);
+      }
+    }
   };
 
   const handleSignOut = async () => {
@@ -52,6 +62,11 @@ export function Header() {
           </nav>
         </div>
         <div className="flex items-center gap-4">
+          {authError && (
+            <span className="text-xs text-amber-500 max-w-[200px] text-right hidden sm:inline">
+              {authError}
+            </span>
+          )}
           {user ? (
             <div className="flex items-center gap-3">
               <span className="text-sm text-muted-foreground hidden sm:inline">
