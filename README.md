@@ -53,7 +53,7 @@ If you believe the people behind open source deserve to get paid, this is how.
 
 ### 1. Database (Supabase)
 
-Create a [Supabase](https://supabase.com) project and run the migrations via the SQL Editor:
+Create a [Supabase](https://supabase.com) project and run the migration via the SQL Editor:
 
 ```
 supabase/migrations/20260327000000_initial_schema.sql
@@ -123,14 +123,14 @@ osspool-backend/          Python — FastAPI + Supabase + Stripe + Razorpay
     core/                 Config, auth, Redis, Supabase client, Stripe init
     crawler/              GitHub API crawler (repos, contributors, stats)
     routers/              API route handlers (repos, contributors, pool, payouts)
-    schemas/              Pydantic request/response models (repos, contributors, pools, payouts)
+    schemas/              Pydantic request/response models
     services/             Business logic (pool distribution, payouts, scoring)
-    tasks/                Background tasks (contributor fetching via Celery or inline)
+    tasks/                Background tasks (contributor fetching)
 
 osspool-frontend/         TypeScript — Next.js 14 + Tailwind + shadcn/ui
   src/
     app/                  Pages (home, donate, repos, contributors, dashboard)
-    components/           Reusable UI components (layout, pool, repos, contributors, ui)
+    components/           Reusable UI components
     lib/                  API client, Supabase client, utilities
 
 supabase/
@@ -248,7 +248,7 @@ docker-compose up --build
 
 This starts the backend (port 8000), frontend (port 3000), Redis, Celery worker, and Celery beat scheduler.
 
-For local development, running the backend and frontend directly (without Docker) is simpler and recommended.
+Note: for local development, running the backend and frontend directly (without Docker) is simpler and recommended.
 
 ## Tech stack
 
@@ -273,4 +273,4 @@ For local development, running the backend and frontend directly (without Docker
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+See [LICENSE](LICENSE).
