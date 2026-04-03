@@ -10,7 +10,7 @@ class PayoutResponse(BaseModel):
     amount_cents: int
     score_snapshot: float = 0.0
     status: str = "pending"
-    stripe_transfer_id: str | None = None
+    razorpay_transfer_id: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
 
@@ -24,6 +24,6 @@ class EarningsResponse(BaseModel):
     payouts: list[PayoutResponse] = []
 
 
-class StripeConnectOnboard(BaseModel):
+class RazorpayOnboard(BaseModel):
     user_id: UUID
     email: str
