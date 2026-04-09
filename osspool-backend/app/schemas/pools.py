@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 
 
@@ -12,6 +12,9 @@ class PoolResponse(BaseModel):
     status: str = "active"
     round_start: datetime
     round_end: datetime
+    platform_fee_cents: int = 0
+    daily_budget_cents: int = 0
+    remaining_cents: int = 0
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -52,3 +55,17 @@ class PoolDetailResponse(BaseModel):
     recent_donations: list[DonationResponse] = []
     repos_count: int = 0
     contributors_count: int = 0
+
+
+class WeeklyDistributionResponse(BaseModel):
+    id: UUID
+    pool_id: UUID
+    week_start: date
+    week_end: date
+    budget_cents: int = 0
+    distributed_cents: int = 0
+    is_month_end: bool = False
+    status: str = "pending"
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

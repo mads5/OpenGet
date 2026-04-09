@@ -8,7 +8,15 @@ from fastapi import Request
 from app.core.auth import get_auth_user
 from app.core.config import get_settings
 from app.core.stripe_client import ensure_stripe_initialized
-from app.schemas.pools import DonationCreate, DonationResponse, PoolResponse, PoolDetailResponse, CheckoutRequest, UpiQrRequest
+from app.schemas.pools import (
+    DonationCreate,
+    DonationResponse,
+    PoolResponse,
+    PoolDetailResponse,
+    CheckoutRequest,
+    UpiQrRequest,
+    WeeklyDistributionResponse,
+)
 from app.services.pool_service import PoolService
 
 logger = logging.getLogger(__name__)
@@ -52,7 +60,7 @@ async def create_checkout_session(
     import stripe
 
     service = PoolService()
-    pool = await service.ensure_active_pool()
+    pool = await service.ensure_collecting_pool()
 
     currency = body.currency or settings.stripe_currency or "usd"
 
@@ -92,16 +100,18 @@ async def donate(
     body: DonationCreate,
     authorization: str | None = Header(None),
 ):
-    """Record a donation (called by webhook after payment, or directly if Stripe is not set up)."""
+    """Record a donation to the collecting pool (for next month's distribution)."""
     user = get_auth_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Sign in to donate")
 
     service = PoolService()
-    pool = await service.ensure_active_pool()
+    pool = await service.ensure_collecting_pool()
 
     try:
-        return await service.add_donation(pool["id"], user.id, body.amount_cents, body.message)
+        return await service.add_donation(
+            pool["id"], user.id, body.amount_cents, body.message
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -124,7 +134,7 @@ async def create_upi_qr(
         )
 
     service = PoolService()
-    pool = await service.ensure_active_pool()
+    pool = await service.ensure_collecting_pool()
 
     try:
         import razorpay
@@ -217,11 +227,41 @@ async def check_upi_qr_status(qr_id: str):
         raise HTTPException(status_code=502, detail=f"Could not check status: {e}")
 
 
+@router.get("/collecting", response_model=PoolResponse | None)
+async def get_collecting_pool():
+    """Return the pool currently collecting donations for next month."""
+    service = PoolService()
+    pool = await service.ensure_collecting_pool()
+    return pool
+
+
 @router.post("/{pool_id}/distribute")
 async def distribute_pool(pool_id: UUID):
     service = PoolService()
     try:
         distributions = await service.distribute_pool(pool_id)
         return {"distributions": distributions, "count": len(distributions)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{pool_id}/distribute-weekly")
+async def distribute_weekly(pool_id: UUID):
+    """Trigger a weekly distribution from the active pool."""
+    service = PoolService()
+    try:
+        distributions = await service.distribute_weekly(is_month_end=False)
+        return {"distributions": distributions, "count": len(distributions)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{pool_id}/finalize")
+async def finalize_pool(pool_id: UUID):
+    """End-of-month finalization: distribute remaining and mark completed."""
+    service = PoolService()
+    try:
+        result = await service.finalize_month()
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

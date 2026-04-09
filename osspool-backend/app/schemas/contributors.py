@@ -4,12 +4,11 @@ from uuid import UUID
 
 
 class ContributorScoreBreakdown(BaseModel):
-    commits_score: float = 0.0
-    prs_score: float = 0.0
-    lines_score: float = 0.0
-    reviews_score: float = 0.0
-    issues_score: float = 0.0
-    recency_score: float = 0.0
+    total_contributions_score: float = 0.0
+    prs_raised_score: float = 0.0
+    prs_merged_score: float = 0.0
+    qualified_repo_count_score: float = 0.0
+    merge_ratio_penalty: float = 1.0
 
 
 class ContributorResponse(BaseModel):
@@ -20,6 +19,7 @@ class ContributorResponse(BaseModel):
     user_id: UUID | None = None
     total_score: float = 0.0
     repo_count: int = 0
+    total_contributions: int = 0
     is_registered: bool = False
     created_at: datetime
 
@@ -50,3 +50,15 @@ class ContributorListResponse(BaseModel):
     total: int
     page: int
     per_page: int
+
+
+class MonthlyContributorStatsResponse(BaseModel):
+    id: UUID
+    contributor_id: UUID
+    repo_id: UUID
+    month: str
+    prs_raised: int = 0
+    prs_merged: int = 0
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

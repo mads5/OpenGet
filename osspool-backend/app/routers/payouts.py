@@ -44,6 +44,17 @@ async def onboard_stripe(body: StripeConnectOnboard):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/{payout_id}/process")
+async def process_single_payout(payout_id: str):
+    """Process a single pending payout via Stripe transfer."""
+    service = PayoutService()
+    try:
+        result = await service.process_payout(payout_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/webhook")
 async def stripe_webhook(request: Request):
     import logging

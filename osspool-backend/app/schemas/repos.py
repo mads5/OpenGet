@@ -17,6 +17,7 @@ class RepoResponse(BaseModel):
     language: str | None = None
     stars: int = 0
     forks: int = 0
+    repo_score: int = 0
     listed_by: UUID
     contributor_count: int = 0
     contributors_fetched_at: datetime | None = None

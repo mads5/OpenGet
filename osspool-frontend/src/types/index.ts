@@ -8,6 +8,7 @@ export interface Repo {
   language: string | null;
   stars: number;
   forks: number;
+  repo_score: number;
   listed_by: string;
   contributor_count: number;
   contributors_fetched_at: string | null;
@@ -32,6 +33,7 @@ export interface Contributor {
   user_id: string | null;
   total_score: number;
   repo_count: number;
+  total_contributions: number;
   is_registered: boolean;
   created_at: string;
 }
@@ -59,9 +61,24 @@ export interface Pool {
   description: string | null;
   total_amount_cents: number;
   donor_count: number;
-  status: "active" | "distributing" | "completed";
+  status: "collecting" | "active" | "distributing" | "completed";
   round_start: string;
   round_end: string;
+  platform_fee_cents: number;
+  daily_budget_cents: number;
+  remaining_cents: number;
+  created_at: string;
+}
+
+export interface WeeklyDistribution {
+  id: string;
+  pool_id: string;
+  week_start: string;
+  week_end: string;
+  budget_cents: number;
+  distributed_cents: number;
+  is_month_end: boolean;
+  status: "pending" | "distributed" | "failed";
   created_at: string;
 }
 

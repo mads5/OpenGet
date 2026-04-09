@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from calendar import monthrange
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -256,6 +257,68 @@ class GitHubCrawler:
 
         await self._set_cached(cache_key, stats, ttl=3600)
         return stats
+
+    # -------------------------------------------------------------------------
+    # Fetch monthly PR stats (raised + merged in a specific month)
+    # -------------------------------------------------------------------------
+    async def fetch_monthly_pr_stats(
+        self, owner: str, repo: str, username: str, month: str
+    ) -> dict:
+        """Fetch PR counts for a contributor in a specific month.
+
+        Args:
+            month: 'YYYY-MM' format
+
+        Returns:
+            {"prs_raised": int, "prs_merged": int}
+        """
+        cache_key = self._cache_key("monthly_prs", owner, repo, username, month)
+        cached = await self._get_cached(cache_key)
+        if cached:
+            return cached
+
+        year, mon = int(month[:4]), int(month[5:7])
+        _, last_day = monthrange(year, mon)
+        date_start = f"{month}-01"
+        date_end = f"{month}-{last_day:02d}"
+
+        result = {"prs_raised": 0, "prs_merged": 0}
+
+        async with httpx.AsyncClient(
+            base_url=self.settings.github_api_base, timeout=30
+        ) as client:
+            raised_q, merged_q = await asyncio.gather(
+                self._request(
+                    client,
+                    f"/search/issues?q=repo:{owner}/{repo}+author:{username}"
+                    f"+type:pr+created:{date_start}..{date_end}&per_page=1",
+                ),
+                self._request(
+                    client,
+                    f"/search/issues?q=repo:{owner}/{repo}+author:{username}"
+                    f"+type:pr+is:merged+closed:{date_start}..{date_end}&per_page=1",
+                ),
+                return_exceptions=True,
+            )
+
+            if not isinstance(raised_q, Exception):
+                result["prs_raised"] = raised_q.get("total_count", 0)
+            else:
+                logger.warning(
+                    "Monthly raised PRs fetch failed for %s in %s/%s: %s",
+                    username, owner, repo, raised_q,
+                )
+
+            if not isinstance(merged_q, Exception):
+                result["prs_merged"] = merged_q.get("total_count", 0)
+            else:
+                logger.warning(
+                    "Monthly merged PRs fetch failed for %s in %s/%s: %s",
+                    username, owner, repo, merged_q,
+                )
+
+        await self._set_cached(cache_key, result, ttl=3600)
+        return result
 
     async def _fetch_commit_details(
         self, client: httpx.AsyncClient, owner: str, repo: str, username: str
